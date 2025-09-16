@@ -43,34 +43,30 @@ def compute_iou(boxes1, boxes2):
 
 def match_anchors_to_targets(anchors, target_boxes, target_labels,
                              pos_threshold=0.5, neg_threshold=0.3):
-    """
-    简化版匹配：最佳匹配 + 阈值
-    返回：
-      matched_labels: [A] (0 背景, 1..C)
-      matched_boxes:  [A,4]
-      pos_mask, neg_mask: bool
-    """
     A = anchors.shape[0]
-    matched_labels = torch.zeros((A,), dtype=torch.long)
-    matched_boxes = torch.zeros((A,4), dtype=torch.float32)
+    device = anchors.device  # ← 关键
+
+    # 在 anchors 的 device 上创建张量
+    matched_labels = torch.zeros((A,), dtype=torch.long, device=device)
+    matched_boxes  = torch.zeros((A, 4), dtype=torch.float32, device=device)
+
     if target_boxes.numel() == 0:
-        neg_mask = torch.ones(A, dtype=torch.bool)
-        pos_mask = torch.zeros(A, dtype=torch.bool)
+        neg_mask = torch.ones(A, dtype=torch.bool, device=device)
+        pos_mask = torch.zeros(A, dtype=torch.bool, device=device)
         return matched_labels, matched_boxes, pos_mask, neg_mask
 
-    iou = compute_iou(anchors, target_boxes)  # [A,T]
+    # 下面计算都会在同一 device 上
+    iou = compute_iou(anchors, target_boxes)  # 两者已在同一设备
     max_iou, max_idx = iou.max(dim=1)
 
-    # 正负样本
     pos_mask = max_iou >= pos_threshold
-    neg_mask = max_iou < neg_threshold
-    # 为每个 GT 至少分配一个最佳 anchor（保证召回）
+    neg_mask = max_iou <  neg_threshold
+
     gt_best_iou, gt_best_anchor = iou.max(dim=0)
     pos_mask[gt_best_anchor] = True
 
     matched_boxes[pos_mask] = target_boxes[max_idx[pos_mask]]
-    # 类别从 1 开始编码（0 预留给背景）
-    tmp = torch.zeros_like(matched_labels)
+    tmp = torch.zeros_like(matched_labels, device=device)
     tmp[pos_mask] = target_labels[max_idx[pos_mask]] + 1
     matched_labels = tmp
     return matched_labels, matched_boxes, pos_mask, neg_mask
